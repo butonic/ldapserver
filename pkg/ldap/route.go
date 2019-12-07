@@ -1,9 +1,14 @@
-package ldapserver
+package ldap
 
 import (
+	stdlog "log"
+	"os"
 	"strings"
 
-	ldap "github.com/lor00x/goldap/message"
+	"github.com/butonic/ldapserver/pkg/constants"
+	"github.com/go-logr/logr"
+	"github.com/go-logr/stdr"
+	"github.com/lor00x/goldap/message"
 )
 
 // Constant to LDAP Request protocol Type names
@@ -22,12 +27,13 @@ const (
 // ordinary functions as LDAP handlers.  If f is a function
 // with the appropriate signature, HandlerFunc(f) is a
 // Handler object that calls f.
-type HandlerFunc func(ResponseWriter, *Message)
+type HandlerFunc func(ResponseWriter, *Request)
 
 // RouteMux manages all routes
 type RouteMux struct {
 	routes        []*route
 	notFoundRoute *route
+	logr          logr.Logger
 }
 
 type route struct {
@@ -47,13 +53,13 @@ type route struct {
 
 // Match return true when the *Message matches the route
 // conditions
-func (r *route) Match(m *Message) bool {
+func (r *route) Match(m *Request) bool {
 	if m.ProtocolOpName() != r.operation {
 		return false
 	}
 
 	switch v := m.ProtocolOp().(type) {
-	case ldap.BindRequest:
+	case message.BindRequest:
 		if r.uAuthChoice == true {
 			if strings.ToLower(v.AuthenticationChoice()) != r.sAuthChoice {
 				return false
@@ -61,13 +67,13 @@ func (r *route) Match(m *Message) bool {
 		}
 		return true
 
-	case ldap.ExtendedRequest:
+	case message.ExtendedRequest:
 		if string(v.RequestName()) != r.exoName {
 			return false
 		}
 		return true
 
-	case ldap.SearchRequest:
+	case message.SearchRequest:
 		if r.uBasedn == true {
 			if strings.ToLower(string(v.BaseObject())) != r.sBasedn {
 				return false
@@ -119,25 +125,28 @@ func (r *route) Scope(scope int) *route {
 	return r
 }
 
-func (r *route) RequestName(name ldap.LDAPOID) *route {
+func (r *route) RequestName(name message.LDAPOID) *route {
 	r.exoName = string(name)
 	return r
 }
 
 // NewRouteMux returns a new *RouteMux
 // RouteMux implements ldapserver.Handler
-func NewRouteMux() *RouteMux {
-	return &RouteMux{}
-}
-
-// Handler interface used to serve a LDAP Request message
-type Handler interface {
-	ServeLDAP(w ResponseWriter, r *Message)
+func NewRouteMux(opts ...Option) *RouteMux {
+	options := newOptions(opts...)
+	r := &RouteMux{}
+	if options.Logger == nil {
+		stdr.SetVerbosity(1)
+		r.logr = stdr.New(stdlog.New(os.Stderr, "", stdlog.LstdFlags|stdlog.Lshortfile))
+	} else {
+		r.logr = options.Logger
+	}
+	return r
 }
 
 // ServeLDAP dispatches the request to the handler whose
 // pattern most closely matches the request request Message.
-func (h *RouteMux) ServeLDAP(w ResponseWriter, r *Message) {
+func (h *RouteMux) ServeLDAP(w ResponseWriter, r *Request) {
 
 	//find a matching Route
 	for _, route := range h.routes {
@@ -148,9 +157,9 @@ func (h *RouteMux) ServeLDAP(w ResponseWriter, r *Message) {
 		}
 
 		if route.label != "" {
-			Logger.Printf("")
-			Logger.Printf(" ROUTE MATCH ; %s", route.label)
-			Logger.Printf("")
+			h.logr.V(3).Info("")
+			h.logr.V(2).Info(" ROUTE MATCH", "route", route.label)
+			h.logr.V(3).Info("")
 			// Logger.Printf(" ROUTE MATCH ; %s", runtime.FuncForPC(reflect.ValueOf(route.handler).Pointer()).Name())
 		}
 
@@ -160,9 +169,9 @@ func (h *RouteMux) ServeLDAP(w ResponseWriter, r *Message) {
 
 	// Catch a AbandonRequest not handled by user
 	switch v := r.ProtocolOp().(type) {
-	case ldap.AbandonRequest:
+	case message.AbandonRequest:
 		// retreive the request to abandon, and send a abort signal to it
-		if requestToAbandon, ok := r.Client.GetMessageByID(int(v)); ok {
+		if requestToAbandon, ok := r.Conn.GetMessageByID(int(v)); ok {
 			requestToAbandon.Abandon()
 		}
 	}
@@ -170,7 +179,7 @@ func (h *RouteMux) ServeLDAP(w ResponseWriter, r *Message) {
 	if h.notFoundRoute != nil {
 		h.notFoundRoute.handler(w, r)
 	} else {
-		res := NewResponse(LDAPResultUnwillingToPerform)
+		res := NewResponse(constants.LDAPResultUnwillingToPerform)
 		res.SetDiagnosticMessage("Operation not implemented by server")
 		w.Write(res)
 	}

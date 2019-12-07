@@ -1,13 +1,15 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	ldap "github.com/butonic/ldapserver"
+	"github.com/butonic/ldapserver/pkg/constants"
+	"github.com/butonic/ldapserver/pkg/ldap"
 )
 
 // localhostCert is a PEM-encoded TLS cert with SAN DNS names
@@ -54,7 +56,10 @@ func getTLSconfig() (*tls.Config, error) {
 
 func main() {
 	//Create a new LDAP Server
-	server := ldap.NewServer()
+	server := ldap.NewServer(
+		// listen on 10636
+		ldap.Addr(":10636"),
+	)
 
 	//Set routes, here, we only serve bindRequest
 	routes := ldap.NewRouteMux()
@@ -66,7 +71,7 @@ func main() {
 		config, _ := getTLSconfig()
 		s.Listener = tls.NewListener(s.Listener, config)
 	}
-	go server.ListenAndServe(":10636", secureConn)
+	go server.ListenAndServe(secureConn)
 
 	// When CTRL+C, SIGINT and SIGTERM signal occurs
 	// Then stop server gracefully
@@ -76,13 +81,13 @@ func main() {
 	// Wait for signal
 	<-ch
 	close(ch)
-	server.Stop()
+	server.Shutdown(context.Background())
 }
 
 // handleBind return Success if login == mysql
-func handleBind(w ldap.ResponseWriter, m *ldap.Message) {
+func handleBind(w ldap.ResponseWriter, m *ldap.Request) {
 	r := m.GetBindRequest()
-	res := ldap.NewBindResponse(ldap.LDAPResultSuccess)
+	res := ldap.NewBindResponse(constants.LDAPResultSuccess)
 
 	if string(r.Name()) == "myLogin" {
 		w.Write(res)
@@ -90,7 +95,7 @@ func handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 	}
 
 	log.Printf("Bind failed User=%s, Pass=%s", string(r.Name()), string(r.AuthenticationSimple()))
-	res.SetResultCode(ldap.LDAPResultInvalidCredentials)
+	res.SetResultCode(constants.LDAPResultInvalidCredentials)
 	res.SetDiagnosticMessage("invalid credentials")
 	w.Write(res)
 }

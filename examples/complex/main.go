@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -8,12 +9,15 @@ import (
 	"os/signal"
 	"syscall"
 
-	ldap "github.com/butonic/ldapserver"
+	"github.com/butonic/ldapserver/pkg/constants"
+	"github.com/butonic/ldapserver/pkg/ldap"
 )
 
 func main() {
 	//Create a new LDAP Server
-	server := ldap.NewServer()
+	server := ldap.NewServer(
+		// listen on 10389
+		ldap.Addr("127.0.0.1:10389"))
 
 	//Create routes bindings
 	routes := ldap.NewRouteMux()
@@ -26,22 +30,22 @@ func main() {
 	routes.Modify(handleModify)
 
 	routes.Extended(handleStartTLS).
-		RequestName(ldap.NoticeOfStartTLS).Label("StartTLS")
+		RequestName(constants.NoticeOfStartTLS).Label("StartTLS")
 
 	routes.Extended(handleWhoAmI).
-		RequestName(ldap.NoticeOfWhoAmI).Label("Ext - WhoAmI")
+		RequestName(constants.NoticeOfWhoAmI).Label("Ext - WhoAmI")
 
 	routes.Extended(handleExtended).Label("Ext - Generic")
 
 	routes.Search(handleSearchDSE).
 		BaseDn("").
-		Scope(ldap.SearchRequestScopeBaseObject).
+		Scope(constants.SearchRequestScopeBaseObject).
 		Filter("(objectclass=*)").
 		Label("Search - ROOT DSE")
 
 	routes.Search(handleSearchMyCompany).
 		BaseDn("o=My Company, c=US").
-		Scope(ldap.SearchRequestScopeBaseObject).
+		Scope(constants.SearchRequestScopeBaseObject).
 		Label("Search - Compagny Root")
 
 	routes.Search(handleSearch).Label("Search - Generic")
@@ -49,8 +53,8 @@ func main() {
 	//Attach routes to server
 	server.Handle(routes)
 
-	// listen on 10389 and serve
-	go server.ListenAndServe("127.0.0.1:10389")
+	// listen and serve
+	go server.ListenAndServe()
 
 	// When CTRL+C, SIGINT and SIGTERM signal occurs
 	// Then stop server gracefully
@@ -59,46 +63,46 @@ func main() {
 	<-ch
 	close(ch)
 
-	server.Stop()
+	server.Shutdown(context.Background())
 }
 
-func handleNotFound(w ldap.ResponseWriter, r *ldap.Message) {
+func handleNotFound(w ldap.ResponseWriter, r *ldap.Request) {
 	switch r.ProtocolOpType() {
-	case ldap.ApplicationBindRequest:
-		res := ldap.NewBindResponse(ldap.LDAPResultSuccess)
+	case constants.ApplicationBindRequest:
+		res := ldap.NewBindResponse(constants.LDAPResultSuccess)
 		res.SetDiagnosticMessage("Default binding behavior set to return Success")
 
 		w.Write(res)
 
 	default:
-		res := ldap.NewResponse(ldap.LDAPResultUnwillingToPerform)
+		res := ldap.NewResponse(constants.LDAPResultUnwillingToPerform)
 		res.SetDiagnosticMessage("Operation not implemented by server")
 		w.Write(res)
 	}
 }
 
-func handleAbandon(w ldap.ResponseWriter, m *ldap.Message) {
+func handleAbandon(w ldap.ResponseWriter, m *ldap.Request) {
 	var req = m.GetAbandonRequest()
 	// retreive the request to abandon, and send a abort signal to it
-	if requestToAbandon, ok := m.Client.GetMessageByID(int(req)); ok {
+	if requestToAbandon, ok := m.Conn.GetMessageByID(int(req)); ok {
 		requestToAbandon.Abandon()
 		log.Printf("Abandon signal sent to request processor [messageID=%d]", int(req))
 	}
 }
 
-func handleBind(w ldap.ResponseWriter, m *ldap.Message) {
+func handleBind(w ldap.ResponseWriter, m *ldap.Request) {
 	r := m.GetBindRequest()
-	res := ldap.NewBindResponse(ldap.LDAPResultSuccess)
+	res := ldap.NewBindResponse(constants.LDAPResultSuccess)
 	if r.AuthenticationChoice() == "simple" {
 		if string(r.Name()) == "login" {
 			w.Write(res)
 			return
 		}
 		log.Printf("Bind failed User=%s, Pass=%#v", string(r.Name()), r.Authentication())
-		res.SetResultCode(ldap.LDAPResultInvalidCredentials)
+		res.SetResultCode(constants.LDAPResultInvalidCredentials)
 		res.SetDiagnosticMessage("invalid credentials")
 	} else {
-		res.SetResultCode(ldap.LDAPResultUnwillingToPerform)
+		res.SetResultCode(constants.LDAPResultUnwillingToPerform)
 		res.SetDiagnosticMessage("Authentication choice not supported")
 	}
 
@@ -113,19 +117,19 @@ func handleBind(w ldap.ResponseWriter, m *ldap.Message) {
 // subtype did not match.  Other result codes indicate either that the
 // result of the comparison was Undefined, or that
 // some error occurred.
-func handleCompare(w ldap.ResponseWriter, m *ldap.Message) {
+func handleCompare(w ldap.ResponseWriter, m *ldap.Request) {
 	r := m.GetCompareRequest()
 	log.Printf("Comparing entry: %s", r.Entry())
 	//attributes values
 	log.Printf(" attribute name to compare : \"%s\"", r.Ava().AttributeDesc())
 	log.Printf(" attribute value expected : \"%s\"", r.Ava().AssertionValue())
 
-	res := ldap.NewCompareResponse(ldap.LDAPResultCompareTrue)
+	res := ldap.NewCompareResponse(constants.LDAPResultCompareTrue)
 
 	w.Write(res)
 }
 
-func handleAdd(w ldap.ResponseWriter, m *ldap.Message) {
+func handleAdd(w ldap.ResponseWriter, m *ldap.Request) {
 	r := m.GetAddRequest()
 	log.Printf("Adding entry: %s", r.Entry())
 	//attributes values
@@ -134,11 +138,11 @@ func handleAdd(w ldap.ResponseWriter, m *ldap.Message) {
 			log.Printf("- %s:%s", attribute.Type_(), attributeValue)
 		}
 	}
-	res := ldap.NewAddResponse(ldap.LDAPResultSuccess)
+	res := ldap.NewAddResponse(constants.LDAPResultSuccess)
 	w.Write(res)
 }
 
-func handleModify(w ldap.ResponseWriter, m *ldap.Message) {
+func handleModify(w ldap.ResponseWriter, m *ldap.Request) {
 	r := m.GetModifyRequest()
 	log.Printf("Modify entry: %s", r.Object())
 
@@ -146,11 +150,11 @@ func handleModify(w ldap.ResponseWriter, m *ldap.Message) {
 		modification := change.Modification()
 		var operationString string
 		switch change.Operation() {
-		case ldap.ModifyRequestChangeOperationAdd:
+		case constants.ModifyRequestChangeOperationAdd:
 			operationString = "Add"
-		case ldap.ModifyRequestChangeOperationDelete:
+		case constants.ModifyRequestChangeOperationDelete:
 			operationString = "Delete"
-		case ldap.ModifyRequestChangeOperationReplace:
+		case constants.ModifyRequestChangeOperationReplace:
 			operationString = "Replace"
 		}
 
@@ -161,31 +165,31 @@ func handleModify(w ldap.ResponseWriter, m *ldap.Message) {
 
 	}
 
-	res := ldap.NewModifyResponse(ldap.LDAPResultSuccess)
+	res := ldap.NewModifyResponse(constants.LDAPResultSuccess)
 	w.Write(res)
 }
 
-func handleDelete(w ldap.ResponseWriter, m *ldap.Message) {
+func handleDelete(w ldap.ResponseWriter, m *ldap.Request) {
 	r := m.GetDeleteRequest()
 	log.Printf("Deleting entry: %s", r)
-	res := ldap.NewDeleteResponse(ldap.LDAPResultSuccess)
+	res := ldap.NewDeleteResponse(constants.LDAPResultSuccess)
 	w.Write(res)
 }
 
-func handleExtended(w ldap.ResponseWriter, m *ldap.Message) {
+func handleExtended(w ldap.ResponseWriter, m *ldap.Request) {
 	r := m.GetExtendedRequest()
 	log.Printf("Extended request received, name=%s", r.RequestName())
 	log.Printf("Extended request received, value=%x", r.RequestValue())
-	res := ldap.NewExtendedResponse(ldap.LDAPResultSuccess)
+	res := ldap.NewExtendedResponse(constants.LDAPResultSuccess)
 	w.Write(res)
 }
 
-func handleWhoAmI(w ldap.ResponseWriter, m *ldap.Message) {
-	res := ldap.NewExtendedResponse(ldap.LDAPResultSuccess)
+func handleWhoAmI(w ldap.ResponseWriter, m *ldap.Request) {
+	res := ldap.NewExtendedResponse(constants.LDAPResultSuccess)
 	w.Write(res)
 }
 
-func handleSearchDSE(w ldap.ResponseWriter, m *ldap.Message) {
+func handleSearchDSE(w ldap.ResponseWriter, m *ldap.Request) {
 	r := m.GetSearchRequest()
 
 	log.Printf("Request BaseDn=%s", r.BaseObject())
@@ -209,11 +213,11 @@ func handleSearchDSE(w ldap.ResponseWriter, m *ldap.Message) {
 	// e.AddAttribute("entryUUID", "f290425c-8272-4e62-8a67-92b06f38dbf5")
 	w.Write(e)
 
-	res := ldap.NewSearchResultDoneResponse(ldap.LDAPResultSuccess)
+	res := ldap.NewSearchResultDoneResponse(constants.LDAPResultSuccess)
 	w.Write(res)
 }
 
-func handleSearchMyCompany(w ldap.ResponseWriter, m *ldap.Message) {
+func handleSearchMyCompany(w ldap.ResponseWriter, m *ldap.Request) {
 	r := m.GetSearchRequest()
 	log.Printf("handleSearchMyCompany - Request BaseDn=%s", r.BaseObject())
 
@@ -221,11 +225,11 @@ func handleSearchMyCompany(w ldap.ResponseWriter, m *ldap.Message) {
 	e.AddAttribute("objectClass", "top", "organizationalUnit")
 	w.Write(e)
 
-	res := ldap.NewSearchResultDoneResponse(ldap.LDAPResultSuccess)
+	res := ldap.NewSearchResultDoneResponse(constants.LDAPResultSuccess)
 	w.Write(res)
 }
 
-func handleSearch(w ldap.ResponseWriter, m *ldap.Message) {
+func handleSearch(w ldap.ResponseWriter, m *ldap.Request) {
 	r := m.GetSearchRequest()
 	log.Printf("Request BaseDn=%s", r.BaseObject())
 	log.Printf("Request Filter=%s", r.Filter())
@@ -256,7 +260,7 @@ func handleSearch(w ldap.ResponseWriter, m *ldap.Message) {
 	e.AddAttribute("cn", "Claire THOMAS")
 	w.Write(e)
 
-	res := ldap.NewSearchResultDoneResponse(ldap.LDAPResultSuccess)
+	res := ldap.NewSearchResultDoneResponse(constants.LDAPResultSuccess)
 	w.Write(res)
 
 }
@@ -303,21 +307,21 @@ func getTLSconfig() (*tls.Config, error) {
 	}, nil
 }
 
-func handleStartTLS(w ldap.ResponseWriter, m *ldap.Message) {
+func handleStartTLS(w ldap.ResponseWriter, m *ldap.Request) {
 	tlsconfig, _ := getTLSconfig()
-	tlsConn := tls.Server(m.Client.GetConn(), tlsconfig)
-	res := ldap.NewExtendedResponse(ldap.LDAPResultSuccess)
-	res.SetResponseName(ldap.NoticeOfStartTLS)
+	tlsConn := tls.Server(m.Conn.GetConn(), tlsconfig)
+	res := ldap.NewExtendedResponse(constants.LDAPResultSuccess)
+	res.SetResponseName(constants.NoticeOfStartTLS)
 	w.Write(res)
 
 	if err := tlsConn.Handshake(); err != nil {
 		log.Printf("StartTLS Handshake error %v", err)
 		res.SetDiagnosticMessage(fmt.Sprintf("StartTLS Handshake error : \"%s\"", err.Error()))
-		res.SetResultCode(ldap.LDAPResultOperationsError)
+		res.SetResultCode(constants.LDAPResultOperationsError)
 		w.Write(res)
 		return
 	}
 
-	m.Client.SetConn(tlsConn)
+	m.Conn.SetConn(tlsConn)
 	log.Println("StartTLS OK")
 }

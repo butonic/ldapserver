@@ -1,15 +1,15 @@
-package ldapserver
+package ldap
 
 import (
 	"bufio"
 	"errors"
 	"fmt"
 
-	ldap "github.com/lor00x/goldap/message"
+	"github.com/lor00x/goldap/message"
 )
 
 type messagePacket struct {
-	bytes []byte
+	Bytes []byte
 }
 
 func readMessagePacket(br *bufio.Reader) (*messagePacket, error) {
@@ -18,39 +18,39 @@ func readMessagePacket(br *bufio.Reader) (*messagePacket, error) {
 	bytes, err = readLdapMessageBytes(br)
 
 	if err == nil {
-		messagePacket := &messagePacket{bytes: *bytes}
+		messagePacket := &messagePacket{Bytes: *bytes}
 		return messagePacket, err
 	}
 	return &messagePacket{}, err
 
 }
 
-func (msg *messagePacket) readMessage() (m ldap.LDAPMessage, err error) {
+func (msg *messagePacket) readMessage() (m message.LDAPMessage, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("invalid packet received hex=%x, %#v", msg.bytes, r)
+			err = fmt.Errorf("invalid packet received hex=%x, %#v", msg.Bytes, r)
 		}
 	}()
 
-	return decodeMessage(msg.bytes)
+	return decodeMessage(msg.Bytes)
 }
 
-func decodeMessage(bytes []byte) (ret ldap.LDAPMessage, err error) {
+func decodeMessage(bytes []byte) (ret message.LDAPMessage, err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			err = errors.New(fmt.Sprintf("%s", e))
 		}
 	}()
 	zero := 0
-	ret, err = ldap.ReadLDAPMessage(ldap.NewBytes(zero, bytes))
+	ret, err = message.ReadLDAPMessage(message.NewBytes(zero, bytes))
 	return
 }
 
-// BELLOW SHOULD BE IN ROOX PACKAGE
+// BELOW SHOULD BE IN ROOT PACKAGE
 
 func readLdapMessageBytes(br *bufio.Reader) (ret *[]byte, err error) {
 	var bytes []byte
-	var tagAndLength ldap.TagAndLength
+	var tagAndLength message.TagAndLength
 	tagAndLength, err = readTagAndLength(br, &bytes)
 	if err != nil {
 		return
@@ -63,7 +63,7 @@ func readLdapMessageBytes(br *bufio.Reader) (ret *[]byte, err error) {
 // into a byte slice. It returns the parsed data and the new offset. SET and
 // SET OF (tag 17) are mapped to SEQUENCE and SEQUENCE OF (tag 16) since we
 // don't distinguish between ordered and unordered objects in this code.
-func readTagAndLength(conn *bufio.Reader, bytes *[]byte) (ret ldap.TagAndLength, err error) {
+func readTagAndLength(conn *bufio.Reader, bytes *[]byte) (ret message.TagAndLength, err error) {
 	// offset = initOffset
 	//b := bytes[offset]
 	//offset++
@@ -100,7 +100,7 @@ func readTagAndLength(conn *bufio.Reader, bytes *[]byte) (ret ldap.TagAndLength,
 		// Bottom 7 bits give the number of length bytes to follow.
 		numBytes := int(b & 0x7f)
 		if numBytes == 0 {
-			err = ldap.SyntaxError{"indefinite length found (not DER)"}
+			err = message.SyntaxError{"indefinite length found (not DER)"}
 			return
 		}
 		ret.Length = 0
@@ -113,7 +113,7 @@ func readTagAndLength(conn *bufio.Reader, bytes *[]byte) (ret ldap.TagAndLength,
 			if ret.Length >= 1<<23 {
 				// We can't shift ret.length up without
 				// overflowing.
-				err = ldap.StructuralError{"length too large"}
+				err = message.StructuralError{"length too large"}
 				return
 			}
 			ret.Length <<= 8
