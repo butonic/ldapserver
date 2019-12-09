@@ -1,18 +1,23 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	ldap "github.com/butonic/ldapserver"
+	"github.com/butonic/ldapserver/pkg/constants"
+	"github.com/butonic/ldapserver/pkg/ldap"
 )
 
 func main() {
 	//Create a new LDAP Server
-	server := ldap.NewServer()
+	server := ldap.NewServer(
+		// listen on 10389
+		ldap.Addr("127.0.0.1:10389"),
+	)
 	// server.ReadTimeout = time.Millisecond * 100
 	// server.WriteTimeout = time.Millisecond * 100
 	routes := ldap.NewRouteMux()
@@ -20,8 +25,7 @@ func main() {
 	routes.Search(handleSearch)
 	server.Handle(routes)
 
-	// listen on 10389
-	go server.ListenAndServe("127.0.0.1:10389")
+	go server.ListenAndServe()
 
 	// When CTRL+C, SIGINT and SIGTERM signal occurs
 	// Then stop server gracefully
@@ -30,10 +34,10 @@ func main() {
 	<-ch
 	close(ch)
 
-	server.Stop()
+	server.Shutdown(context.Background())
 }
 
-func handleSearch(w ldap.ResponseWriter, m *ldap.Message) {
+func handleSearch(w ldap.ResponseWriter, m *ldap.Request) {
 	r := m.GetSearchRequest()
 	log.Printf("Request BaseDn=%s", r.BaseObject())
 	log.Printf("Request Filter=%s", r.FilterString())
@@ -60,14 +64,14 @@ func handleSearch(w ldap.ResponseWriter, m *ldap.Message) {
 		time.Sleep(time.Millisecond * 800)
 	}
 
-	res := ldap.NewSearchResultDoneResponse(ldap.LDAPResultSuccess)
+	res := ldap.NewSearchResultDoneResponse(constants.LDAPResultSuccess)
 	w.Write(res)
 
 }
 
 // handleBind return Success for any login/pass
-func handleBind(w ldap.ResponseWriter, m *ldap.Message) {
-	res := ldap.NewBindResponse(ldap.LDAPResultSuccess)
+func handleBind(w ldap.ResponseWriter, m *ldap.Request) {
+	res := ldap.NewBindResponse(constants.LDAPResultSuccess)
 	w.Write(res)
 	return
 }

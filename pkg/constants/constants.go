@@ -1,4 +1,4 @@
-package ldapserver
+package constants
 
 import ldap "github.com/lor00x/goldap/message"
 
