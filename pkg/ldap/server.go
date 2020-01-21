@@ -21,7 +21,8 @@ import (
 func NewServer(opts ...Option) *Server {
 	options := newOptions(opts...)
 	s := &Server{
-		Addr: options.Addr,
+		Addr:      options.Addr,
+		TLSConfig: options.TLSConfig,
 	}
 	if options.Logger == nil {
 		stdr.SetVerbosity(1)
@@ -320,6 +321,25 @@ func (srv *Server) ListenAndServe() error {
 		return err
 	}
 	return srv.Serve(ln)
+}
+
+// ListenAndServeTLS listens on the TCP network address s.Addr and then
+// calls ServeLTS to handle requests on incoming connections.  If
+// s.Addr is blank, ":636" is used.
+func (srv *Server) ListenAndServeTLS() error {
+	if srv.shuttingDown() {
+		return ErrServerClosed
+	}
+	addr := srv.Addr
+	if addr == "" {
+		addr = ":636"
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+
+	return srv.ServeTLS(ln, "", "")
 }
 
 // ErrServerClosed is returned by the Server's Serve, (TODO ServeTLS,) ListenAndServe,

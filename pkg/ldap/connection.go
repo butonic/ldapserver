@@ -3,6 +3,7 @@ package ldap
 import (
 	"bufio"
 	"context"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -185,6 +186,9 @@ func (c *conn) serve() {
 
 		//Read client input as a ASN1/BER binary message
 		messagePacket, err := c.readPacket()
+		if err == io.EOF {
+			return
+		}
 		if err != nil {
 			if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
 				c.server.Logger.Error(err, "Sorry client, I can not wait anymore (reading timeout) !", "conn", c.Count)

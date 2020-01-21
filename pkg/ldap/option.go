@@ -1,6 +1,7 @@
 package ldap
 
 import (
+	"crypto/tls"
 	"net"
 
 	"github.com/go-logr/logr"
@@ -19,14 +20,20 @@ func newOptions(opts ...Option) Options {
 type Option func(o *Options)
 
 type Options struct {
-	Addr     string
-	Logger   logr.Logger
-	Listener net.Listener
+	Addr      string
+	Logger    logr.Logger
+	Listener  net.Listener
+	TLSConfig *tls.Config
 }
 
 func Addr(val string) Option {
 	return func(o *Options) {
 		o.Addr = val
+	}
+}
+func TLSConfig(val *tls.Config) Option {
+	return func(o *Options) {
+		o.TLSConfig = val
 	}
 }
 func Logger(val logr.Logger) Option {
